@@ -5,7 +5,6 @@ from collections import OrderedDict
 from pytracking.evaluation.environment import env_settings
 import time
 import cv2 as cv
-from pytracking.utils.visdom import Visdom
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from pytracking.utils.plotting import draw_figure, overlay_mask
@@ -67,44 +66,12 @@ class Tracker:
         else:
             self.tracker_class = None
 
-        self.visdom = None
-
-
-    def _init_visdom(self, visdom_info, debug):
-        visdom_info = {} if visdom_info is None else visdom_info
-        self.pause_mode = False
-        self.step = False
-        if debug > 0 and visdom_info.get('use_visdom', True):
-            try:
-                self.visdom = Visdom(debug, {'handler': self._visdom_ui_handler, 'win_id': 'Tracking'},
-                                     visdom_info=visdom_info)
-
-                # Show help
-                help_text = 'You can pause/unpause the tracker by pressing ''space'' with the ''Tracking'' window ' \
-                            'selected. During paused mode, you can track for one frame by pressing the right arrow key.' \
-                            'To enable/disable plotting of a data block, tick/untick the corresponding entry in ' \
-                            'block list.'
-                self.visdom.register(help_text, 'text', 1, 'Help')
-            except:
-                time.sleep(0.5)
-                print('!!! WARNING: Visdom could not start, so using matplotlib visualization instead !!!\n'
-                      '!!! Start Visdom in a separate terminal window by typing \'visdom\' !!!')
-
-    def _visdom_ui_handler(self, data):
-        if data['event_type'] == 'KeyPress':
-            if data['key'] == ' ':
-                self.pause_mode = not self.pause_mode
-
-            elif data['key'] == 'ArrowRight' and self.pause_mode:
-                self.step = True
-
 
     def create_tracker(self, params):
         tracker = self.tracker_class(params)
-        tracker.visdom = self.visdom
         return tracker
 
-    def run_sequence(self, seq, visualization=None, debug=None, visdom_info=None, multiobj_mode=None):
+    def run_sequence(self, seq, visualization=None, debug=None, multiobj_mode=None):
         """Run tracker on sequence.
         args:
             seq: Sequence to run the tracker on.
@@ -128,8 +95,7 @@ class Tracker:
         params.visualization = visualization_
         params.debug = debug_
 
-        self._init_visdom(visdom_info, debug_)
-        if visualization_ and self.visdom is None:
+        if visualization_ is None:
             self.init_visualization()
 
         # Get init information
@@ -142,7 +108,7 @@ class Tracker:
         if multiobj_mode == 'default' or is_single_object:
             tracker = self.create_tracker(params)
         elif multiobj_mode == 'parallel':
-            tracker = MultiObjectWrapper(self.tracker_class, params, self.visdom)
+            tracker = MultiObjectWrapper(self.tracker_class, params)
         else:
             raise ValueError('Unknown multi object mode {}'.format(multiobj_mode))
 
@@ -179,7 +145,7 @@ class Tracker:
         # Initialize
         image = self._read_image(seq.frames[0])
 
-        if tracker.params.visualization and self.visdom is None:
+        if tracker.params.visualization is None:
             self.visualize(image, init_info.get('init_bbox'))
 
         start_time = time.time()
@@ -218,9 +184,7 @@ class Tracker:
             _store_outputs(out, {'time': time.time() - start_time})
 
             segmentation = out['segmentation'] if 'segmentation' in out else None
-            if self.visdom is not None:
-                tracker.visdom_draw_tracking(image, out['target_bbox'], segmentation)
-            elif tracker.params.visualization:
+            if tracker.params.visualization:
                 self.visualize(image, out['target_bbox'], segmentation)
 
         for key in ['target_bbox', 'segmentation']:
@@ -229,7 +193,7 @@ class Tracker:
 
         return output
 
-    def run_video(self, videofilepath, optional_box=None, debug=None, visdom_info=None, save_results=False):
+    def run_video(self, videofilepath, optional_box=None, debug=None, save_results=False):
         """Run the tracker with the vieofile.
         args:
             debug: Debug level.
@@ -244,8 +208,7 @@ class Tracker:
 
         params.tracker_name = self.name
         params.param_name = self.parameter_name
-        self._init_visdom(visdom_info, debug_)
-
+        
         multiobj_mode = getattr(params, 'multiobj_mode', getattr(self.tracker_class, 'multiobj_mode', 'default'))
 
         if multiobj_mode == 'default':
@@ -254,7 +217,7 @@ class Tracker:
                 tracker.initialize_features()
 
         elif multiobj_mode == 'parallel':
-            tracker = MultiObjectWrapper(self.tracker_class, params, self.visdom, fast_load=True)
+            tracker = MultiObjectWrapper(self.tracker_class, params, fast_load=True)
         else:
             raise ValueError('Unknown multi object mode {}'.format(multiobj_mode))
 
@@ -352,7 +315,7 @@ class Tracker:
             bbox_file = '{}.txt'.format(base_results_path)
             np.savetxt(bbox_file, tracked_bb, delimiter='\t', fmt='%d')
 
-    def run_webcam(self, debug=None, visdom_info=None):
+    def run_webcam(self, debug=None):
         """Run the tracker with the webcam.
         args:
             debug: Debug level.
@@ -368,14 +331,13 @@ class Tracker:
         params.tracker_name = self.name
         params.param_name = self.parameter_name
 
-        self._init_visdom(visdom_info, debug_)
 
         multiobj_mode = getattr(params, 'multiobj_mode', getattr(self.tracker_class, 'multiobj_mode', 'default'))
 
         if multiobj_mode == 'default':
             tracker = self.create_tracker(params)
         elif multiobj_mode == 'parallel':
-            tracker = MultiObjectWrapper(self.tracker_class, params, self.visdom, fast_load=True)
+            tracker = MultiObjectWrapper(self.tracker_class, params, fast_load=True)
         else:
             raise ValueError('Unknown multi object mode {}'.format(multiobj_mode))
 
@@ -487,7 +449,7 @@ class Tracker:
         cap.release()
         cv.destroyAllWindows()
 
-    def run_vot2020(self, debug=None, visdom_info=None):
+    def run_vot2020(self, debug=None):
         params = self.get_parameters()
         params.tracker_name = self.name
         params.param_name = self.parameter_name
@@ -505,7 +467,6 @@ class Tracker:
         params.visualization = visualization_
         params.debug = debug_
 
-        self._init_visdom(visdom_info, debug_)
 
         tracker = self.create_tracker(params)
         tracker.initialize_features()
@@ -573,13 +534,11 @@ class Tracker:
             handle.report(pred, 1.0)
 
             segmentation = out['segmentation'] if 'segmentation' in out else None
-            if self.visdom is not None:
-                tracker.visdom_draw_tracking(image, out['target_bbox'], segmentation)
-            elif tracker.params.visualization:
+            if tracker.params.visualization:
                 self.visualize(image, out['target_bbox'], segmentation)
 
 
-    def run_vot(self, debug=None, visdom_info=None):
+    def run_vot(self, debug=None):
         params = self.get_parameters()
         params.tracker_name = self.name
         params.param_name = self.parameter_name
@@ -597,7 +556,6 @@ class Tracker:
         params.visualization = visualization_
         params.debug = debug_
 
-        self._init_visdom(visdom_info, debug_)
 
         tracker = self.create_tracker(params)
         tracker.initialize_features()
@@ -645,9 +603,7 @@ class Tracker:
             handle.report(vot.Rectangle(state[0], state[1], state[2], state[3]))
 
             segmentation = out['segmentation'] if 'segmentation' in out else None
-            if self.visdom is not None:
-                tracker.visdom_draw_tracking(image, out['target_bbox'], segmentation)
-            elif tracker.params.visualization:
+            if tracker.params.visualization:
                 self.visualize(image, out['target_bbox'], segmentation)
 
     def get_parameters(self):
